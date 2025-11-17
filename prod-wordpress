@@ -23,7 +23,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: YOUR_IP/32   # CHANGE THIS
+          CidrIp: 64.99.223.87/32   
 
   ProdDBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
