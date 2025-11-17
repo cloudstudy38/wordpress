@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Free Dev Scheduler using Lambda + EventBridge (cron)
+
+Parameters:
+  Timezone:
+    Type: String
+    Default: Asia/Kolkata   # Change to your timezone
+
+Resources:
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EC2Control
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                  - ec2:DescribeInstances
+                Resource: '*'
+
+  SchedulerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt SchedulerRole.Arn
+      Runtime: python3.12
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          def lambda_handler(event, context):
+              ec2 = boto3.client('ec2')
+              filters = [{'Name': 'tag:Schedule', 'Values': ['business-hours']}]
+              instances = ec2.describe_instances(Filters=filters)
+              ids = []
+              for res in instances['Reservations']:
+                  for inst in res['Instances']:
+                      ids.append(inst['InstanceId'])
+              action = event['action']
+              if ids:
+                  if action == 'start':
+                      ec2.start_instances(InstanceIds=ids)
+                  else:
+                      ec2.stop_instances(InstanceIds=ids)
+
+  StartRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: cron(30 3 ? * MON-FRI *)   # 9:00 AM = 03:30 UTC (adjust for your TZ)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SchedulerLambda.Arn
+          Id: StartDev
+          Input: '{"action":"start"}'
+
+  StopRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: cron(30 12 ? * MON-FRI *)   # 6:00 PM = 12:30 UTC
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SchedulerLambda.Arn
+          Id: StopDev
+          Input: '{"action":"stop"}'
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SchedulerLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt StartRule.Arn
+    DependsOn: SchedulerLambda
+  # Repeat Permission for StopRule if needed
