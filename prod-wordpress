@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Free-Tier Production WordPress - t3.micro + db.t3.micro
+
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+
+Resources:
+  ProdSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP + SSH (restrict SSH!)
+      VpcId: !ImportValue WordPress-VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: YOUR_IP/32   # CHANGE THIS
+
+  ProdDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Prod DB
+      SubnetIds:
+        - !ImportValue PrivateSubnetA
+        - !ImportValue PrivateSubnetB
+
+  ProdRDS:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: '8.0'
+      AllocatedStorage: '20'
+      MasterUsername: prodwp
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref ProdDBSubnetGroup
+      VPCSecurityGroups: [!Ref ProdSG]
+      PubliclyAccessible: false
+
+  ProdInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: ami-0c55b159cbfafe1f0   # Amazon Linux 2 – update for your region
+      SubnetId: !ImportValue PublicSubnetA
+      SecurityGroupIds: [!Ref ProdSG]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+          yum install -y httpd mariadb-server
+          systemctl start httpd
+          systemctl enable httpd
+          wget https://wordpress.org/latest.tar.gz
+          tar -xzf latest.tar.gz -C /var/www/html --strip-components=1
+          cp /var/www/html/wp-config-sample.php /var/www/html/wp-config.php
+          sed -i "s/database_name_here/wordpress/" /var/www/html/wp-config.php
+          sed -i "s/username_here/prodwp/" /var/www/html/wp-config.php
+          sed -i "s/password_here/${DBPassword}/" /var/www/html/wp-config.php
+          sed -i "s/localhost/${ProdRDS.Endpoint.Address}/" /var/www/html/wp-config.php
+          chown -R apache:apache /var/www/html
+      Tags:
+        - Key: Name
+          Value: WordPress-Prod
+
+Outputs:
+  ProdURL:
+    Value: !Sub http://${ProdInstance.PublicDnsName}
