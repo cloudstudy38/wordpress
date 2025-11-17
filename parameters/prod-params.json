@@ -1,0 +1,4 @@
+[
+  { "ParameterKey": "KeyName", "ParameterValue": "wordpress-key" },
+  { "ParameterKey": "DBPassword", "ParameterValue": "YourStrongProdPass123!" }
+]
